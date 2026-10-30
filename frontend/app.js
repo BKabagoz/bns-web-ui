@@ -361,12 +361,12 @@ function fcLinewidthAxisLayout() {
   const tickvals = indices.map((index) => values[index]);
   const ticktext = indices.map((index) => formatNumber(fcHalfLinewidthHz({ ...configured, [field]: values[index] }), 4));
   const secondary = {
-    overlaying: axis, side: axis === "x" ? "top" : "right", title: "FC HWHM [Hz]",
+    overlaying: axis, side: axis === "x" ? "top" : "right", title: { text: "FC HWHM [Hz]", font: { color: "#84d6bf", size: Math.max(10, figureFontSize() - 1) } },
     tickmode: "array", tickvals, ticktext, showgrid: false, zeroline: false, ticks: "outside",
-    range: [Math.min(...values), Math.max(...values)], anchor: axis === "x" ? "y" : "x",
+    range: [Math.min(...values), Math.max(...values)], anchor: "free", position: 1,
     visible: true, showticklabels: true, showline: true, linecolor: "#84d6bf", linewidth: 1.2,
     tickcolor: "#84d6bf", ticklen: 5, fixedrange: true,
-    tickfont: { color: "#84d6bf", size: 10 }, titlefont: { color: "#84d6bf", size: 11 },
+    tickfont: { color: "#84d6bf", size: Math.max(9, figureFontSize() - 2) },
   };
   return { axes: { [axis === "x" ? "xaxis2" : "yaxis2"]: secondary }, x: axis === "x", y: axis === "y" };
 }
@@ -624,13 +624,17 @@ async function reweightResults() {
       body: JSON.stringify({ mass1_msun: mass1, mass2_msun: mass2 }),
     });
     state.result.alternative_range_mpc = response.range_mpc;
-    state.result.baseline_alternative_range_mpc = response.baseline_range_mpc;
-    state.result.metadata.alternative_range = response.metadata;
+    if (response.baseline_range_mpc !== undefined) state.result.baseline_alternative_range_mpc = response.baseline_range_mpc;
+    state.result.metadata.alternative_range = response.metadata || {
+      ...state.result.metadata.alternative_range, mass1_msun: mass1, mass2_msun: mass2,
+    };
     state.mapKind = "alternative";
     setActiveMapTab();
     renderMap();
     renderAnalysis();
-    elements.reweightNote.textContent = `${mass1} + ${mass2} M⊙ applied. ${response.message}`;
+    elements.reweightNote.textContent = response.metadata
+      ? `${mass1} + ${mass2} M⊙ applied. ${response.message}`
+      : `${mass1} + ${mass2} M⊙ applied to this map. Restart the laptop backend with the updated files to reweight line winners too.`;
   } catch (error) {
     elements.reweightNote.textContent = `Could not reweight: ${error.message}`;
   } finally {
@@ -682,14 +686,28 @@ function figureFontSize() {
 
 function figureAxis(title, extra = {}) {
   const colors = figureColors();
-  return { title, gridcolor: colors.grid, zerolinecolor: colors.zero, automargin: true, ...extra };
+  const isLog = extra.type === "log";
+  return {
+    title, gridcolor: colors.grid, zerolinecolor: colors.zero, automargin: false,
+    showline: true, mirror: true, linecolor: colors.zero, linewidth: 1,
+    ...(isLog ? { dtick: 1, minor: { showgrid: true, gridcolor: colors.grid, ticks: "" } } : {}),
+    ...extra,
+  };
+}
+
+function figureMargins(kind) {
+  // Fixed generous margins keep the usable plot rectangle stable while users
+  // switch themes, font sizes, map layers, or the FC secondary axis.
+  return kind === "map"
+    ? { l: 88, r: 150, t: 72, b: 74 }
+    : { l: 88, r: 62, t: 72, b: 74 };
 }
 
 function plotTheme() {
   const colors = figureColors();
   return {
     paper_bgcolor: colors.paper, plot_bgcolor: colors.plot, font: { color: colors.ink, size: figureFontSize() },
-    margin: { l: 68, r: 26, t: 32, b: 58 }, hoverlabel: { bgcolor: colors.hover, font: { color: colors.hoverInk } },
+    margin: figureMargins("analysis"), hoverlabel: { bgcolor: colors.hover, font: { color: colors.hoverInk } },
   };
 }
 
@@ -760,7 +778,7 @@ function renderMap() {
   const defaultInside = insideSweep(defaultX, x) && insideSweep(defaultY, y);
   const traces = [{
     type: "heatmap", x, y, z: info.grid, colorscale: colorscaleFor("map"),
-    colorbar: { title: { text: info.colorTitle, side: "right" }, thickness: 13 },
+    colorbar: { title: { text: info.colorTitle, side: "right" }, thickness: 13, x: 1.17 },
     hovertemplate: `${xLabel}: %{x:.6g}<br>${yLabel}: %{y:.6g}<br>${info.colorTitle}: %{z:.6g}<extra></extra>`,
   }];
   if (elements.showWinners.checked && state.mapKind !== "mismatch") {
@@ -791,7 +809,7 @@ function renderMap() {
   const fcAxis = fcLinewidthAxisLayout();
   const theme = plotTheme();
   const layout = {
-    ...theme, ...fcAxis.axes, margin: { ...theme.margin, t: fcAxis.x ? 72 : theme.margin.t, r: fcAxis.y ? 104 : theme.margin.r }, title: { text: info.title, font: { size: 13 } },
+    ...theme, ...fcAxis.axes, margin: figureMargins("map"), title: { text: info.title, font: { size: figureFontSize() } },
     xaxis: figureAxis(state.result.x_parameter.label),
     yaxis: figureAxis(state.result.y_parameter.label),
     showlegend: false,
@@ -849,7 +867,7 @@ async function renderSelectedLine() {
   const fixedLabel = orientation === "horizontal" ? state.result.y_parameter.label : state.result.x_parameter.label;
   const title = `${orientation === "horizontal" ? "Row" : "Column"} at ${fixedLabel} = ${formatNumber(fixed)}`;
   Plotly.react(elements.analysisPlot, traces, {
-    ...plotTheme(), title: { text: title, font: { size: 13 } },
+    ...plotTheme(), title: { text: title, font: { size: figureFontSize() } },
     xaxis: figureAxis("Frequency [Hz]", { type: "log" }),
     yaxis: figureAxis("Displacement ASD [m/√Hz]", { type: "log" }),
     showlegend: elements.showLegend.checked,
@@ -869,7 +887,7 @@ async function renderBestLines() {
     name: `${coordinateText(record.x, record.y, { separator: " · " })} · ${formatNumber(record.range_mpc)} Mpc`,
   }));
   Plotly.react(elements.analysisPlot, traces, {
-    ...plotTheme(), title: { text: `Best spectrum from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: 13 } },
+    ...plotTheme(), title: { text: `Best spectrum from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: figureFontSize() } },
     xaxis: figureAxis("Frequency [Hz]", { type: "log" }),
     yaxis: figureAxis("Displacement ASD [m/√Hz]", { type: "log" }),
     showlegend: elements.showLegend.checked,
@@ -893,7 +911,7 @@ async function renderWinningPoints() {
   const fcAxis = fcLinewidthAxisLayout();
   const theme = plotTheme();
   Plotly.react(elements.analysisPlot, [trace], {
-    ...theme, ...fcAxis.axes, margin: { ...theme.margin, t: fcAxis.x ? 72 : theme.margin.t, r: fcAxis.y ? 104 : theme.margin.r }, title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: 13 } },
+    ...theme, ...fcAxis.axes, margin: figureMargins("map"), title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: figureFontSize() } },
     xaxis: figureAxis(state.result.x_parameter.label),
     yaxis: figureAxis(state.result.y_parameter.label),
     showlegend: false,
