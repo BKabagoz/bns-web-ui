@@ -278,13 +278,22 @@ async def reweight(job_id: str, request: ReweightRequest) -> dict[str, Any]:
     try:
         map_mpc = reweight_cached_spectra(result, request.mass1_msun, request.mass2_msun)
         original = result["metadata"]["standard_range"]
-        BNSRange(original["fmin_hz"], result["frequency_hz"][-1], len(result["frequency_hz"]),
-                 request.mass1_msun, request.mass2_msun, frequency_grid=result["frequency_hz"])
+        metric = BNSRange(original["fmin_hz"], result["frequency_hz"][-1], len(result["frequency_hz"]),
+                          request.mass1_msun, request.mass2_msun, frequency_grid=result["frequency_hz"])
+        baseline_asd = np.asarray(result["baseline_displacement_asd"], dtype=float)
+        baseline_length = float(result.get("baseline_arm_length_m", np.asarray(result["arm_length_m"])[0, 0]))
+        baseline_mpc = (metric((baseline_asd / baseline_length)**2)
+                        if np.all(np.isfinite(baseline_asd)) and baseline_length > 0 else float("nan"))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    result["alternative_range_mpc"] = map_mpc
+    result["baseline_alternative_range_mpc"] = baseline_mpc
+    result["metadata"]["alternative_range"] = metric.metadata()
     return _clean_json({
         "mass1_msun": request.mass1_msun, "mass2_msun": request.mass2_msun,
         "range_mpc": map_mpc,
+        "baseline_range_mpc": baseline_mpc,
+        "metadata": result["metadata"]["alternative_range"],
         "message": "Reweighted cached spectra; no additional GWINC calls were made.",
     })
 

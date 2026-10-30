@@ -207,6 +207,7 @@ def compute_sweep(request: Any, is_cancelled: Callable[[], bool], progress: Prog
         "frequency_hz": metric.freq.copy(),
         "displacement_asd": spectra,
         "baseline_displacement_asd": baseline_asd,
+        "baseline_arm_length_m": float(get_model_value(baseline, ("Infrastructure", "Length"))),
         "baseline_range_mpc": baseline_standard,
         "baseline_alternative_range_mpc": baseline_alternative,
         "arm_length_m": sweep_arm_lengths(configured_data, x_path, y_path, xs, ys),
