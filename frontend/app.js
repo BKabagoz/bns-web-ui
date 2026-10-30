@@ -361,6 +361,9 @@ function fcLinewidthAxisLayout() {
   const secondary = {
     overlaying: axis, side: axis === "x" ? "top" : "right", title: "FC HWHM [Hz]",
     tickmode: "array", tickvals, ticktext, showgrid: false, zeroline: false, ticks: "outside",
+    range: [Math.min(...values), Math.max(...values)], anchor: axis === "x" ? "y" : "x",
+    visible: true, showticklabels: true, showline: true, linecolor: "#84d6bf", linewidth: 1.2,
+    tickcolor: "#84d6bf", ticklen: 5, fixedrange: true,
     tickfont: { color: "#84d6bf", size: 10 }, titlefont: { color: "#84d6bf", size: 11 },
   };
   return { axes: { [axis === "x" ? "xaxis2" : "yaxis2"]: secondary }, x: axis === "x", y: axis === "y" };
@@ -734,9 +737,9 @@ function renderMap() {
   const fcAxis = fcLinewidthAxisLayout();
   const theme = plotTheme();
   const layout = {
-    ...theme, ...fcAxis.axes, margin: { ...theme.margin, t: fcAxis.x ? 58 : theme.margin.t, r: fcAxis.y ? 78 : theme.margin.r }, title: { text: info.title, font: { size: 13 } },
-    xaxis: { title: state.result.x_parameter.label, gridcolor: "#26343f", zerolinecolor: "#344651" },
-    yaxis: { title: state.result.y_parameter.label, gridcolor: "#26343f", zerolinecolor: "#344651" },
+    ...theme, ...fcAxis.axes, margin: { ...theme.margin, t: fcAxis.x ? 72 : theme.margin.t, r: fcAxis.y ? 104 : theme.margin.r }, title: { text: info.title, font: { size: 13 } },
+    xaxis: { title: state.result.x_parameter.label, gridcolor: "#26343f", zerolinecolor: "#344651", automargin: true },
+    yaxis: { title: state.result.y_parameter.label, gridcolor: "#26343f", zerolinecolor: "#344651", automargin: true },
     showlegend: false,
   };
   Plotly.react(elements.mapPlot, traces, layout, { responsive: true, displaylogo: false });
@@ -754,10 +757,10 @@ function renderMap() {
     ? "The hollow rectangle marks the unchanged YAML operating point."
     : `The YAML operating point (${coordinateText(defaultX, defaultY)}) is outside this sweep.`;
   if (state.mapKind === "mismatch") {
-    elements.mapReadout.textContent = `Derived coherent two-mode SQZ–IFO mismatch in the common OMC basis. It uses no additional GWINC calls. ${operatingPointNote}`;
+    elements.mapReadout.textContent = `Derived coherent two-mode SQZ–IFO mismatch in the common OMC basis. It uses no additional GWINC calls.${elements.showFcAxis.checked ? " Green secondary ticks show FC HWHM." : ""} ${operatingPointNote}`;
   } else {
     const selected = info.grid[state.selection.iy]?.[state.selection.ix];
-    elements.mapReadout.textContent = `Selected: ${coordinateText(x[state.selection.ix], y[state.selection.iy])}, range = ${formatNumber(selected)} Mpc. Click a cell to change the selected line. ${operatingPointNote}`;
+    elements.mapReadout.textContent = `Selected: ${coordinateText(x[state.selection.ix], y[state.selection.iy])}, range = ${formatNumber(selected)} Mpc.${elements.showFcAxis.checked ? " Green secondary ticks show FC HWHM." : ""} Click a cell to change the selected line. ${operatingPointNote}`;
   }
 }
 
@@ -836,9 +839,9 @@ async function renderWinningPoints() {
   const fcAxis = fcLinewidthAxisLayout();
   const theme = plotTheme();
   Plotly.react(elements.analysisPlot, [trace], {
-    ...theme, ...fcAxis.axes, margin: { ...theme.margin, t: fcAxis.x ? 58 : theme.margin.t, r: fcAxis.y ? 78 : theme.margin.r }, title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: 13 } },
-    xaxis: { title: state.result.x_parameter.label, gridcolor: "#26343f" },
-    yaxis: { title: state.result.y_parameter.label, gridcolor: "#26343f" },
+    ...theme, ...fcAxis.axes, margin: { ...theme.margin, t: fcAxis.x ? 72 : theme.margin.t, r: fcAxis.y ? 104 : theme.margin.r }, title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: 13 } },
+    xaxis: { title: state.result.x_parameter.label, gridcolor: "#26343f", automargin: true },
+    yaxis: { title: state.result.y_parameter.label, gridcolor: "#26343f", automargin: true },
     showlegend: false,
   }, { responsive: true, displaylogo: false });
   if (elements.analysisPlot.removeAllListeners) elements.analysisPlot.removeAllListeners("plotly_click");
