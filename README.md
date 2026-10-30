@@ -31,17 +31,28 @@ uvicorn backend.app:app --host 127.0.0.1 --port 8000
 Then open <http://127.0.0.1:8000>. The server serves the browser UI locally,
 so no GitHub account, domain, or tunnel is needed for this first test.
 
-Choose a YAML model from your computer. The browser uploads its text to the
-server for this calculation only; it does not give visitors a way to browse the
-server's files. The parameter editor starts from the YAML values. Blank fixed
-fields retain the YAML values, and the selected X/Y fields always use their
-sweep grids.
+The UI includes a built-in BNS example at `frontend/examples/default.yaml`.
+It loads automatically after the compute server connects, and the **Load
+built-in example** button restores it after a visitor chooses another file.
+This YAML is deliberately public: do not put secrets, private paths, or
+unpublished configuration values in it. Visitors can instead choose a YAML
+model from their computer. The browser uploads its text to the server for this
+calculation only; it does not give visitors a way to browse the server's files.
+The parameter editor starts from the YAML values. Blank fixed fields retain the
+YAML values, and the selected X/Y fields always use their sweep grids.
+
+When one of the filter-cavity linewidth inputs (`L`, `Ti`, `Te`, or `Lrt`) is
+selected as a sweep axis, the controls show the half-width at half-maximum
+(HWHM) and full width at half-maximum (FWHM). With a linewidth input on an
+axis, the displayed interval is the range across its requested sweep bounds.
 
 The calculation service keeps the spectra in RAM after a completed sweep. This
 makes map clicks, selected-line plots, best-of-every-line plots, winning X/Y
-points, cached mass reweighting through the API, and NPZ download available
-without new GWINC calls. The same 1 GiB spectrum-cache limit used by the
-desktop UI is enforced per job.
+points, cached mass reweighting through the API, and full-result NPZ download
+available without new GWINC calls. After a sweep, the browser also provides
+CSV downloads for the map and currently displayed ASD data, plus PNG downloads
+for both figures. The same 1 GiB spectrum-cache limit used by the desktop UI
+is enforced per job.
 
 ## Queue and cancellation
 

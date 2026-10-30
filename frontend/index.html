@@ -48,8 +48,11 @@
           <summary>Model and axes</summary>
           <div class="details-content">
             <label class="field-label" for="yaml-file">Interferometer YAML</label>
-            <input id="yaml-file" type="file" accept=".yaml,.yml,text/yaml,text/x-yaml">
-            <p id="yaml-status" class="field-note">Choose the same YAML model you use with the desktop UI.</p>
+            <div class="model-file-row">
+              <input id="yaml-file" type="file" accept=".yaml,.yml,text/yaml,text/x-yaml">
+              <button id="load-default-model" type="button" class="quiet-button">Load built-in example</button>
+            </div>
+            <p id="yaml-status" class="field-note">The built-in example loads automatically after the compute server connects. You can replace it with your own YAML at any time.</p>
 
             <div class="axis-grid">
               <fieldset>
@@ -68,6 +71,13 @@
               </fieldset>
             </div>
             <p id="grid-readout" class="field-note">Load a model to choose two numerical fields.</p>
+            <section id="fc-linewidth" class="fc-linewidth" hidden aria-live="polite">
+              <div>
+                <p class="eyebrow">FILTER CAVITY</p>
+                <strong id="fc-linewidth-value">—</strong>
+              </div>
+              <p id="fc-linewidth-note"></p>
+            </section>
           </div>
         </details>
 
@@ -130,7 +140,17 @@
           <button id="show-controls" class="quiet-button">Controls</button>
           <button id="run-sweep" class="primary-button" disabled>Run sweep</button>
           <button id="cancel-sweep" class="quiet-button danger" disabled>Cancel</button>
-          <button id="download-results" class="quiet-button" disabled>Download NPZ</button>
+          <button id="download-results" class="quiet-button" disabled title="All numerical results and cached spectra">Full data (.npz)</button>
+          <div class="export-group" aria-label="Map downloads">
+            <span>Map</span>
+            <button id="download-map-csv" class="export-button" disabled title="Download all map cells as CSV">CSV</button>
+            <button id="download-map-png" class="export-button" disabled title="Download the current map view as PNG">PNG</button>
+          </div>
+          <div class="export-group" aria-label="Analysis downloads">
+            <span>ASD</span>
+            <button id="download-analysis-csv" class="export-button" disabled title="Download the currently displayed analysis data as CSV">CSV</button>
+            <button id="download-analysis-png" class="export-button" disabled title="Download the current analysis view as PNG">PNG</button>
+          </div>
           <div class="action-spacer"></div>
           <span id="job-id" class="job-id"></span>
         </div>

@@ -6,6 +6,9 @@
 const state = {
   apiBase: "",
   token: "",
+  serverConnected: false,
+  defaultYamlText: "",
+  defaultYamlName: "Built-in BNS example",
   yamlText: "",
   yamlName: "",
   parameters: [],
@@ -19,21 +22,33 @@ const state = {
   colorscales: { map: "Viridis", asd: "Viridis" },
 };
 
+const DEFAULT_MODEL_URL = "examples/default.yaml";
+const SPEED_OF_LIGHT_M_S = 299792458;
+const FC_LINEWIDTH_PATHS = {
+  length: ["Squeezer", "FilterCavity", "L"],
+  inputTransmission: ["Squeezer", "FilterCavity", "Ti"],
+  endTransmission: ["Squeezer", "FilterCavity", "Te"],
+  roundTripLoss: ["Squeezer", "FilterCavity", "Lrt"],
+};
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const elements = {
   app: $("#application"), controls: $("#controls"), apiBase: $("#api-base"), token: $("#access-token"),
-  serverStatus: $("#server-status"), checkServer: $("#check-server"), yamlFile: $("#yaml-file"),
+  serverStatus: $("#server-status"), checkServer: $("#check-server"), yamlFile: $("#yaml-file"), loadDefaultModel: $("#load-default-model"),
   yamlStatus: $("#yaml-status"), xParameter: $("#x-parameter"), yParameter: $("#y-parameter"),
   xMinimum: $("#x-minimum"), xMaximum: $("#x-maximum"), xPoints: $("#x-points"),
   yMinimum: $("#y-minimum"), yMaximum: $("#y-maximum"), yPoints: $("#y-points"),
   gridReadout: $("#grid-readout"), parameterEditor: $("#parameter-editor"),
   parameterFilter: $("#parameter-filter"), overrideCount: $("#override-count"),
+  fcLinewidth: $("#fc-linewidth"), fcLinewidthValue: $("#fc-linewidth-value"), fcLinewidthNote: $("#fc-linewidth-note"),
   fmin: $("#fmin"), fmax: $("#fmax"), frequencyPoints: $("#frequency-points"),
   outputCalibration: $("#output-calibration"), altMass1: $("#alternative-mass-1"), altMass2: $("#alternative-mass-2"),
   colorscaleTarget: $("#colorscale-target"), mapColorscale: $("#map-colorscale"), lineOrientation: $("#line-orientation"),
   showWinners: $("#show-winners"), showLegend: $("#show-legend"), run: $("#run-sweep"), cancel: $("#cancel-sweep"),
-  download: $("#download-results"), jobTitle: $("#job-title"), jobMessage: $("#job-message"),
+  download: $("#download-results"), downloadMapCsv: $("#download-map-csv"), downloadMapPng: $("#download-map-png"),
+  downloadAnalysisCsv: $("#download-analysis-csv"), downloadAnalysisPng: $("#download-analysis-png"),
+  jobTitle: $("#job-title"), jobMessage: $("#job-message"),
   jobProgress: $("#job-progress"), jobProgressText: $("#job-progress-text"), jobId: $("#job-id"),
   mapPlot: $("#map-plot"), mapTitle: $("#map-title"), mapReadout: $("#map-readout"),
   analysisPlot: $("#analysis-plot"), analysisTitle: $("#analysis-title"), analysisReadout: $("#analysis-readout"),
@@ -137,9 +152,12 @@ async function checkServer() {
   setServerStatus("Checking compute server…");
   try {
     const health = await apiJson("/api/health");
+    state.serverConnected = true;
     const suffix = health.gwinc_version ? ` GWINC ${health.gwinc_version} is available.` : " GWINC is not installed yet.";
     setServerStatus(`Connected. ${health.worker_concurrency} calculation worker${health.worker_concurrency === 1 ? "" : "s"}.${suffix}`, health.gwinc_version ? "ok" : "problem");
+    if (!state.yamlText && state.defaultYamlText) loadDefaultModel();
   } catch (error) {
+    state.serverConnected = false;
     setServerStatus(`Could not reach the compute server: ${error.message}`, "problem");
   }
 }
@@ -148,6 +166,12 @@ function setInputsEnabled(enabled) {
   [elements.xParameter, elements.yParameter, elements.xMinimum, elements.xMaximum, elements.xPoints,
    elements.yMinimum, elements.yMaximum, elements.yPoints].forEach((element) => { element.disabled = !enabled; });
   elements.run.disabled = !enabled;
+}
+
+function setDownloadsEnabled(enabled) {
+  [elements.download, elements.downloadMapCsv, elements.downloadMapPng,
+   elements.downloadAnalysisCsv, elements.downloadAnalysisPng]
+    .forEach((element) => { element.disabled = !enabled; });
 }
 
 function makeOption(parameter) {
@@ -170,6 +194,7 @@ function populateParameters(parameters) {
   setAxisDefaults("y");
   renderParameterEditor();
   updateGridReadout();
+  updateFcLinewidth();
 }
 
 function setAxisDefaults(axis) {
@@ -217,6 +242,7 @@ function renderParameterEditor() {
       if (input.value.trim()) state.overrides.set(key, input.value.trim());
       else state.overrides.delete(key);
       updateOverrideCount();
+      updateFcLinewidth();
     });
     row.append(name, input);
     fragment.append(row);
@@ -248,11 +274,81 @@ function updateGridReadout() {
   }
 }
 
-async function loadYamlFile(file) {
-  if (!file) return;
-  state.yamlText = await file.text();
-  state.yamlName = file.name;
-  elements.yamlStatus.textContent = `Reading ${file.name}…`;
+function parameterDefault(path) {
+  return Number(state.parameters.find((parameter) => samePath(parameter.path, path))?.default);
+}
+
+function configuredFcValues() {
+  const values = {};
+  Object.entries(FC_LINEWIDTH_PATHS).forEach(([name, path]) => {
+    const raw = state.overrides.get(JSON.stringify(path));
+    values[name] = raw === undefined || raw === "" ? parameterDefault(path) : Number(raw);
+  });
+  return values;
+}
+
+function fcHalfLinewidthHz(values) {
+  const { length, inputTransmission, endTransmission, roundTripLoss } = values;
+  const totalLoss = inputTransmission + endTransmission + roundTripLoss;
+  if (![length, inputTransmission, endTransmission, roundTripLoss, totalLoss].every(Number.isFinite)
+      || length <= 0 || totalLoss <= 0) return NaN;
+  return SPEED_OF_LIGHT_M_S * totalLoss / (4 * Math.PI * length);
+}
+
+function fcSweepValues() {
+  const configured = configuredFcValues();
+  const relevantAxes = [];
+  [[elements.xParameter, elements.xMinimum, elements.xMaximum], [elements.yParameter, elements.yMinimum, elements.yMaximum]]
+    .forEach(([select, minimum, maximum]) => {
+      let path;
+      try { path = pathFor(select); } catch (_) { return; }
+      const field = Object.entries(FC_LINEWIDTH_PATHS).find(([, candidate]) => samePath(candidate, path));
+      if (!field) return;
+      const low = Number(minimum.value);
+      const high = Number(maximum.value);
+      if (!Number.isFinite(low) || !Number.isFinite(high)) return;
+      relevantAxes.push({ field: field[0], values: [low, high] });
+    });
+  const combinations = [{}];
+  relevantAxes.forEach(({ field, values }) => {
+    const next = [];
+    combinations.forEach((combination) => values.forEach((value) => next.push({ ...combination, [field]: value })));
+    combinations.splice(0, combinations.length, ...next);
+  });
+  return { relevantAxes, widths: combinations.map((update) => fcHalfLinewidthHz({ ...configured, ...update })) };
+}
+
+function updateFcLinewidth() {
+  if (!state.parameters.length) {
+    elements.fcLinewidth.hidden = true;
+    return;
+  }
+  const { relevantAxes, widths } = fcSweepValues();
+  if (!relevantAxes.length) {
+    elements.fcLinewidth.hidden = true;
+    return;
+  }
+  const finiteWidths = widths.filter(Number.isFinite);
+  if (!finiteWidths.length) {
+    elements.fcLinewidth.hidden = false;
+    elements.fcLinewidthValue.textContent = "Cannot calculate";
+    elements.fcLinewidthNote.textContent = "Filter-cavity length and total loss must be positive finite values.";
+    return;
+  }
+  const low = Math.min(...finiteWidths);
+  const high = Math.max(...finiteWidths);
+  const isRange = Math.abs(high - low) > Math.max(1e-10, Math.abs(high) * 1e-9);
+  elements.fcLinewidth.hidden = false;
+  elements.fcLinewidthValue.textContent = isRange
+    ? `${formatNumber(low, 4)}–${formatNumber(high, 4)} Hz HWHM`
+    : `${formatNumber(low, 4)} Hz HWHM`;
+  elements.fcLinewidthNote.textContent = `${isRange ? "Across this sweep; " : ""}FWHM ${formatNumber(2 * low, 4)}${isRange ? `–${formatNumber(2 * high, 4)}` : ""} Hz. γ = c(Ti + Te + Lrt)/(4πL).`;
+}
+
+async function loadYamlText(yamlText, yamlName) {
+  state.yamlText = yamlText;
+  state.yamlName = yamlName;
+  elements.yamlStatus.textContent = `Reading ${yamlName}…`;
   try {
     const response = await apiJson("/api/model/parameters", {
       method: "POST",
@@ -261,15 +357,46 @@ async function loadYamlFile(file) {
     });
     state.overrides.clear();
     populateParameters(response.parameters);
-    elements.yamlStatus.textContent = `${file.name}: ${response.parameters.length} finite numeric fields are available.`;
+    elements.yamlStatus.textContent = `${yamlName}: ${response.parameters.length} finite numeric fields are available.`;
     setJobPanel("Model loaded", "Choose axes and submit a calculation when ready.");
   } catch (error) {
     state.yamlText = "";
     state.parameters = [];
     setInputsEnabled(false);
+    updateFcLinewidth();
     elements.yamlStatus.textContent = `Could not load this YAML: ${error.message}`;
     setJobPanel("Model not loaded", error.message);
   }
+}
+
+async function loadYamlFile(file) {
+  if (!file) return;
+  await loadYamlText(await file.text(), file.name);
+}
+
+async function prepareDefaultModel() {
+  try {
+    const response = await fetch(DEFAULT_MODEL_URL);
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    state.defaultYamlText = await response.text();
+    if (!state.yamlText) elements.yamlStatus.textContent = "Built-in example is ready. Connect to the compute server to load it.";
+    if (state.serverConnected && !state.yamlText) loadDefaultModel();
+  } catch (error) {
+    elements.loadDefaultModel.disabled = true;
+    elements.yamlStatus.textContent = `Could not fetch the built-in example: ${error.message}`;
+  }
+}
+
+async function loadDefaultModel() {
+  if (!state.defaultYamlText) {
+    await prepareDefaultModel();
+    if (!state.defaultYamlText) return;
+  }
+  if (!state.serverConnected) {
+    elements.yamlStatus.textContent = "Connect to the compute server before loading the built-in example.";
+    return;
+  }
+  await loadYamlText(state.defaultYamlText, state.defaultYamlName);
 }
 
 function collectOverrides() {
@@ -334,7 +461,7 @@ async function runSweep() {
     state.job = job;
     state.result = null;
     elements.cancel.disabled = false;
-    elements.download.disabled = true;
+    setDownloadsEnabled(false);
     elements.jobId.textContent = `job ${job.id.slice(0, 8)}`;
     updateJob(job);
     startPolling();
@@ -415,7 +542,7 @@ async function loadResult() {
       iy: closestIndex(state.result.y, state.result.y_parameter.default),
     };
     elements.run.disabled = false;
-    elements.download.disabled = false;
+    setDownloadsEnabled(true);
     renderResult();
     setJobPanel("Complete", `Calculated ${state.result.completed_points.toLocaleString()} grid points in ${state.result.elapsed_s.toFixed(1)} s.`, state.result.completed_points, state.result.total_points);
   } catch (error) {
@@ -711,15 +838,100 @@ async function downloadResults() {
   try {
     const response = await api(`/api/jobs/${state.job.id}/download`);
     const blob = await response.blob();
-    const anchor = document.createElement("a");
-    anchor.href = URL.createObjectURL(blob);
-    anchor.download = `bns_sweep_${state.job.id.slice(0, 8)}.npz`;
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(anchor.href);
+    downloadBlob(`bns_sweep_${state.job.id.slice(0, 8)}.npz`, blob);
   } catch (error) {
     setJobPanel("Could not download results", error.message);
+  }
+}
+
+function downloadBlob(filename, blob) {
+  const anchor = document.createElement("a");
+  const objectUrl = URL.createObjectURL(blob);
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
+function csvCell(value) {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "number" && !Number.isFinite(value)) return "";
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll("\"", "\"\"")}"` : text;
+}
+
+function downloadCsv(filename, headers, rows) {
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  downloadBlob(filename, new Blob([csv], { type: "text/csv;charset=utf-8" }));
+}
+
+function resultFileStem(suffix) {
+  return `bns_sweep_${state.job?.id?.slice(0, 8) || "results"}_${suffix}`;
+}
+
+function downloadMapCsv() {
+  if (!state.result) return;
+  const { x, y, x_parameter: xParameter, y_parameter: yParameter } = state.result;
+  const rows = [];
+  y.forEach((yValue, iy) => x.forEach((xValue, ix) => rows.push([
+    xValue,
+    yValue,
+    state.result.range_mpc?.[iy]?.[ix],
+    state.result.alternative_range_mpc?.[iy]?.[ix],
+    state.result.sqz_ifo_mismatch_percent?.[iy]?.[ix],
+  ])));
+  downloadCsv(`${resultFileStem("maps")}.csv`, [
+    `${xParameter.label} (x)`,
+    `${yParameter.label} (y)`,
+    "standard_range_mpc",
+    "alternative_range_mpc",
+    "sqz_ifo_mismatch_percent",
+  ], rows);
+}
+
+function downloadAnalysisCsv() {
+  if (!state.result) return;
+  const traces = Array.from(elements.analysisPlot.data || []);
+  if (!traces.length) {
+    setJobPanel("Analysis plot not ready", "Wait for the selected analysis view to finish loading, then try again.");
+    return;
+  }
+  if (state.analysisKind === "points") {
+    const trace = traces[0];
+    const rows = Array.from(trace.x || []).map((xValue, index) => [
+      xValue,
+      trace.y?.[index],
+      trace.customdata?.[index]?.[2],
+    ]);
+    downloadCsv(`${resultFileStem("winning_coordinates")}.csv`, [
+      `${state.result.x_parameter.label} (x)`,
+      `${state.result.y_parameter.label} (y)`,
+      "range_mpc",
+    ], rows);
+    return;
+  }
+  const rowCount = Math.max(...traces.map((trace) => trace.y?.length || 0));
+  const rows = Array.from({ length: rowCount }, (_, index) => {
+    const frequency = traces.find((trace) => trace.x?.[index] !== undefined)?.x?.[index];
+    return [frequency, ...traces.map((trace) => trace.y?.[index])];
+  });
+  downloadCsv(`${resultFileStem(state.analysisKind === "best" ? "best_asd" : "selected_line_asd")}.csv`, [
+    "frequency_hz",
+    ...traces.map((trace, index) => trace.name || `asd_${index + 1}`),
+  ], rows);
+}
+
+async function downloadPlotImage(element, suffix) {
+  if (!state.result || !window.Plotly || !element.data?.length) {
+    setJobPanel("Plot not ready", "Wait for the plot to finish rendering, then try again.");
+    return;
+  }
+  try {
+    await Plotly.downloadImage(element, { format: "png", filename: resultFileStem(suffix), scale: 2 });
+  } catch (error) {
+    setJobPanel("Could not download plot", error.message);
   }
 }
 
@@ -736,8 +948,10 @@ function bindEvents() {
   elements.apiBase.addEventListener("change", () => { state.apiBase = normalizeBase(elements.apiBase.value); });
   elements.token.addEventListener("input", () => { state.token = elements.token.value.trim(); });
   elements.yamlFile.addEventListener("change", () => loadYamlFile(elements.yamlFile.files[0]));
-  elements.xParameter.addEventListener("change", () => { setAxisDefaults("x"); renderParameterEditor(); updateGridReadout(); });
-  elements.yParameter.addEventListener("change", () => { setAxisDefaults("y"); renderParameterEditor(); updateGridReadout(); });
+  elements.loadDefaultModel.addEventListener("click", loadDefaultModel);
+  elements.xParameter.addEventListener("change", () => { setAxisDefaults("x"); renderParameterEditor(); updateGridReadout(); updateFcLinewidth(); });
+  elements.yParameter.addEventListener("change", () => { setAxisDefaults("y"); renderParameterEditor(); updateGridReadout(); updateFcLinewidth(); });
+  [elements.xMinimum, elements.xMaximum, elements.yMinimum, elements.yMaximum].forEach((element) => element.addEventListener("input", updateFcLinewidth));
   [elements.xPoints, elements.yPoints].forEach((element) => element.addEventListener("input", updateGridReadout));
   elements.parameterFilter.addEventListener("input", renderParameterEditor);
   elements.colorscaleTarget.addEventListener("change", syncColorscaleControl);
@@ -752,6 +966,10 @@ function bindEvents() {
   elements.run.addEventListener("click", runSweep);
   elements.cancel.addEventListener("click", cancelSweep);
   elements.download.addEventListener("click", downloadResults);
+  elements.downloadMapCsv.addEventListener("click", downloadMapCsv);
+  elements.downloadMapPng.addEventListener("click", () => downloadPlotImage(elements.mapPlot, `${state.mapKind}_map`));
+  elements.downloadAnalysisCsv.addEventListener("click", downloadAnalysisCsv);
+  elements.downloadAnalysisPng.addEventListener("click", () => downloadPlotImage(elements.analysisPlot, `${state.analysisKind}_analysis`));
   $$(".tab-button").forEach((button) => button.addEventListener("click", () => {
     if (button.disabled) return;
     state.mapKind = button.dataset.map;
@@ -773,5 +991,6 @@ document.addEventListener("DOMContentLoaded", () => {
   bindEvents();
   setInputsEnabled(false);
   setJobPanel("Ready", "Load a YAML model, choose axes, then start a sweep.");
+  prepareDefaultModel();
   window.setTimeout(() => { if (state.apiBase) checkServer(); }, 250);
 });
