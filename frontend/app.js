@@ -45,7 +45,7 @@ const elements = {
   fmin: $("#fmin"), fmax: $("#fmax"), frequencyPoints: $("#frequency-points"),
   outputCalibration: $("#output-calibration"), altMass1: $("#alternative-mass-1"), altMass2: $("#alternative-mass-2"),
   colorscaleTarget: $("#colorscale-target"), mapColorscale: $("#map-colorscale"), lineOrientation: $("#line-orientation"),
-  showWinners: $("#show-winners"), showLegend: $("#show-legend"), run: $("#run-sweep"), cancel: $("#cancel-sweep"),
+  showWinners: $("#show-winners"), showLegend: $("#show-legend"), showFcAxis: $("#show-fc-axis"), showFcAxisLabel: $("#show-fc-axis-label"), run: $("#run-sweep"), cancel: $("#cancel-sweep"),
   download: $("#download-results"), downloadMapCsv: $("#download-map-csv"), downloadMapPng: $("#download-map-png"),
   downloadAnalysisCsv: $("#download-analysis-csv"), downloadAnalysisPng: $("#download-analysis-png"),
   jobTitle: $("#job-title"), jobMessage: $("#job-message"),
@@ -195,6 +195,7 @@ function populateParameters(parameters) {
   renderParameterEditor();
   updateGridReadout();
   updateFcLinewidth();
+  updateFcAxisControl();
 }
 
 function setAxisDefaults(axis) {
@@ -318,6 +319,53 @@ function fcSweepValues() {
   return { relevantAxes, widths: combinations.map((update) => fcHalfLinewidthHz({ ...configured, ...update })) };
 }
 
+function fcSweepField(select) {
+  try {
+    const path = pathFor(select);
+    return Object.entries(FC_LINEWIDTH_PATHS).find(([, candidate]) => samePath(candidate, path))?.[0] || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function updateFcAxisControl() {
+  const fields = [fcSweepField(elements.xParameter), fcSweepField(elements.yParameter)].filter(Boolean);
+  const available = fields.length === 1;
+  elements.showFcAxis.disabled = !available;
+  if (!available) elements.showFcAxis.checked = false;
+  elements.showFcAxisLabel.title = available
+    ? "Add a secondary axis labeled with the corresponding filter-cavity HWHM."
+    : "Select exactly one filter-cavity linewidth input (L, Ti, Te, or Lrt) as an axis to enable this option.";
+}
+
+function resultAxisParameter(axis) {
+  return axis === "x" ? state.result.x_parameter : state.result.y_parameter;
+}
+
+function coordinateText(xValue, yValue, { separator = ", " } = {}) {
+  return `${resultAxisParameter("x").label} = ${formatNumber(xValue)}${separator}${resultAxisParameter("y").label} = ${formatNumber(yValue)}`;
+}
+
+function fcLinewidthAxisLayout() {
+  if (!state.result || !elements.showFcAxis.checked) return { axes: {}, x: false, y: false };
+  const xField = fcSweepField(elements.xParameter);
+  const yField = fcSweepField(elements.yParameter);
+  if (Boolean(xField) === Boolean(yField)) return { axes: {}, x: false, y: false };
+  const axis = xField ? "x" : "y";
+  const field = xField || yField;
+  const values = state.result[axis];
+  const configured = configuredFcValues();
+  const indices = [...new Set([0, Math.round((values.length - 1) * .25), Math.round((values.length - 1) * .5), Math.round((values.length - 1) * .75), values.length - 1])];
+  const tickvals = indices.map((index) => values[index]);
+  const ticktext = indices.map((index) => formatNumber(fcHalfLinewidthHz({ ...configured, [field]: values[index] }), 4));
+  const secondary = {
+    overlaying: axis, side: axis === "x" ? "top" : "right", title: "FC HWHM [Hz]",
+    tickmode: "array", tickvals, ticktext, showgrid: false, zeroline: false, ticks: "outside",
+    tickfont: { color: "#84d6bf", size: 10 }, titlefont: { color: "#84d6bf", size: 11 },
+  };
+  return { axes: { [axis === "x" ? "xaxis2" : "yaxis2"]: secondary }, x: axis === "x", y: axis === "y" };
+}
+
 function updateFcLinewidth() {
   if (!state.parameters.length) {
     elements.fcLinewidth.hidden = true;
@@ -364,6 +412,7 @@ async function loadYamlText(yamlText, yamlName) {
     state.parameters = [];
     setInputsEnabled(false);
     updateFcLinewidth();
+    updateFcAxisControl();
     elements.yamlStatus.textContent = `Could not load this YAML: ${error.message}`;
     setJobPanel("Model not loaded", error.message);
   }
@@ -649,18 +698,20 @@ function renderMap() {
   const horizontal = elements.lineOrientation.value === "horizontal";
   const defaultX = Number(state.result.x_parameter.default);
   const defaultY = Number(state.result.y_parameter.default);
+  const xLabel = escapeText(state.result.x_parameter.label);
+  const yLabel = escapeText(state.result.y_parameter.label);
   const defaultInside = insideSweep(defaultX, x) && insideSweep(defaultY, y);
   const traces = [{
     type: "heatmap", x, y, z: info.grid, colorscale: colorscaleFor("map"),
     colorbar: { title: { text: info.colorTitle, side: "right" }, thickness: 13 },
-    hovertemplate: `${escapeText(state.result.x_parameter.label)}: %{x:.6g}<br>${escapeText(state.result.y_parameter.label)}: %{y:.6g}<br>${info.colorTitle}: %{z:.6g}<extra></extra>`,
+    hovertemplate: `${xLabel}: %{x:.6g}<br>${yLabel}: %{y:.6g}<br>${info.colorTitle}: %{z:.6g}<extra></extra>`,
   }];
   if (elements.showWinners.checked && state.mapKind !== "mismatch") {
     const points = winners(info.grid, horizontal);
     traces.push({
       type: "scatter", mode: "markers", x: points.map((point) => x[point.ix]), y: points.map((point) => y[point.iy]),
       marker: { size: 9, color: "rgba(255,255,255,0)", line: { color: "#f3f6f7", width: 1.35 } },
-      hovertemplate: "Line winner<br>x=%{x:.6g}<br>y=%{y:.6g}<extra></extra>", name: "Line winners",
+      hovertemplate: `Line winner<br>${xLabel}: %{x:.6g}<br>${yLabel}: %{y:.6g}<extra></extra>`, name: "Line winners",
     });
   }
   // The selected row/column is the data shown in the Selected line panel.
@@ -676,12 +727,14 @@ function renderMap() {
     traces.push({
       type: "scatter", mode: "markers", x: [defaultX], y: [defaultY],
       marker: { symbol: "square-open", size: 15, color: "#f3f6f7", line: { color: "#f3f6f7", width: 2 } },
-      hovertemplate: "Unchanged YAML operating point<br>x=%{x:.6g}<br>y=%{y:.6g}<extra></extra>",
+      hovertemplate: `Unchanged YAML operating point<br>${xLabel}: %{x:.6g}<br>${yLabel}: %{y:.6g}<extra></extra>`,
       showlegend: false, name: "YAML operating point",
     });
   }
+  const fcAxis = fcLinewidthAxisLayout();
+  const theme = plotTheme();
   const layout = {
-    ...plotTheme(), title: { text: info.title, font: { size: 13 } },
+    ...theme, ...fcAxis.axes, margin: { ...theme.margin, t: fcAxis.x ? 58 : theme.margin.t, r: fcAxis.y ? 78 : theme.margin.r }, title: { text: info.title, font: { size: 13 } },
     xaxis: { title: state.result.x_parameter.label, gridcolor: "#26343f", zerolinecolor: "#344651" },
     yaxis: { title: state.result.y_parameter.label, gridcolor: "#26343f", zerolinecolor: "#344651" },
     showlegend: false,
@@ -699,12 +752,12 @@ function renderMap() {
   elements.mapTitle.textContent = info.title;
   const operatingPointNote = defaultInside
     ? "The hollow rectangle marks the unchanged YAML operating point."
-    : `The YAML operating point (x=${formatNumber(defaultX)}, y=${formatNumber(defaultY)}) is outside this sweep.`;
+    : `The YAML operating point (${coordinateText(defaultX, defaultY)}) is outside this sweep.`;
   if (state.mapKind === "mismatch") {
     elements.mapReadout.textContent = `Derived coherent two-mode SQZ–IFO mismatch in the common OMC basis. It uses no additional GWINC calls. ${operatingPointNote}`;
   } else {
     const selected = info.grid[state.selection.iy]?.[state.selection.ix];
-    elements.mapReadout.textContent = `Selected: x=${formatNumber(x[state.selection.ix])}, y=${formatNumber(y[state.selection.iy])}, range=${formatNumber(selected)} Mpc. Click a cell to change the selected line. ${operatingPointNote}`;
+    elements.mapReadout.textContent = `Selected: ${coordinateText(x[state.selection.ix], y[state.selection.iy])}, range = ${formatNumber(selected)} Mpc. Click a cell to change the selected line. ${operatingPointNote}`;
   }
 }
 
@@ -725,7 +778,7 @@ async function renderSelectedLine() {
     return {
       type: "scatter", mode: "lines", x: data.frequency_hz, y: record.asd,
       line: { color: isWinner ? "#f1c46a" : lineColor(indexRecord, data.records.length), width: isWinner ? 3 : 1.1 },
-      name: `x=${formatNumber(record.x)}, y=${formatNumber(record.y)} · ${formatNumber(record.range_mpc)} Mpc`,
+      name: `${coordinateText(record.x, record.y, { separator: " · " })} · ${formatNumber(record.range_mpc)} Mpc`,
       hovertemplate: "f=%{x:.4g} Hz<br>ASD=%{y:.4g} m/√Hz<extra>%{fullData.name}</extra>",
     };
   });
@@ -756,7 +809,7 @@ async function renderBestLines() {
   const traces = data.records.filter((record) => record.asd).map((record, index) => ({
     type: "scatter", mode: "lines", x: data.frequency_hz, y: record.asd,
     line: { color: lineColor(index, data.records.length), width: 1.6 },
-    name: `x=${formatNumber(record.x)}, y=${formatNumber(record.y)} · ${formatNumber(record.range_mpc)} Mpc`,
+    name: `${coordinateText(record.x, record.y, { separator: " · " })} · ${formatNumber(record.range_mpc)} Mpc`,
   }));
   Plotly.react(elements.analysisPlot, traces, {
     ...plotTheme(), title: { text: `Best spectrum from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: 13 } },
@@ -778,10 +831,12 @@ async function renderWinningPoints() {
     customdata: data.records.map((record) => [record.ix, record.iy, record.range_mpc]),
     marker: { size: 10, color: data.records.map((record) => record.range_mpc), colorscale: colorscaleFor("map"), showscale: true,
       colorbar: { title: "Range [Mpc]", thickness: 13 } },
-    hovertemplate: "x=%{x:.6g}<br>y=%{y:.6g}<br>Range=%{customdata[2]:.6g} Mpc<extra></extra>",
+    hovertemplate: `${escapeText(state.result.x_parameter.label)} = %{x:.6g}<br>${escapeText(state.result.y_parameter.label)} = %{y:.6g}<br>Range = %{customdata[2]:.6g} Mpc<extra></extra>`,
   };
+  const fcAxis = fcLinewidthAxisLayout();
+  const theme = plotTheme();
   Plotly.react(elements.analysisPlot, [trace], {
-    ...plotTheme(), title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: 13 } },
+    ...theme, ...fcAxis.axes, margin: { ...theme.margin, t: fcAxis.x ? 58 : theme.margin.t, r: fcAxis.y ? 78 : theme.margin.r }, title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: 13 } },
     xaxis: { title: state.result.x_parameter.label, gridcolor: "#26343f" },
     yaxis: { title: state.result.y_parameter.label, gridcolor: "#26343f" },
     showlegend: false,
@@ -949,8 +1004,8 @@ function bindEvents() {
   elements.token.addEventListener("input", () => { state.token = elements.token.value.trim(); });
   elements.yamlFile.addEventListener("change", () => loadYamlFile(elements.yamlFile.files[0]));
   elements.loadDefaultModel.addEventListener("click", loadDefaultModel);
-  elements.xParameter.addEventListener("change", () => { setAxisDefaults("x"); renderParameterEditor(); updateGridReadout(); updateFcLinewidth(); });
-  elements.yParameter.addEventListener("change", () => { setAxisDefaults("y"); renderParameterEditor(); updateGridReadout(); updateFcLinewidth(); });
+  elements.xParameter.addEventListener("change", () => { setAxisDefaults("x"); renderParameterEditor(); updateGridReadout(); updateFcLinewidth(); updateFcAxisControl(); });
+  elements.yParameter.addEventListener("change", () => { setAxisDefaults("y"); renderParameterEditor(); updateGridReadout(); updateFcLinewidth(); updateFcAxisControl(); });
   [elements.xMinimum, elements.xMaximum, elements.yMinimum, elements.yMaximum].forEach((element) => element.addEventListener("input", updateFcLinewidth));
   [elements.xPoints, elements.yPoints].forEach((element) => element.addEventListener("input", updateGridReadout));
   elements.parameterFilter.addEventListener("input", renderParameterEditor);
@@ -963,6 +1018,7 @@ function bindEvents() {
   elements.lineOrientation.addEventListener("change", () => { renderMap(); renderAnalysis(); });
   elements.showWinners.addEventListener("change", renderMap);
   elements.showLegend.addEventListener("change", renderAnalysis);
+  elements.showFcAxis.addEventListener("change", () => { renderMap(); renderAnalysis(); });
   elements.run.addEventListener("click", runSweep);
   elements.cancel.addEventListener("click", cancelSweep);
   elements.download.addEventListener("click", downloadResults);
