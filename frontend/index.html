@@ -150,6 +150,26 @@
             </label>
           </div>
         </details>
+
+        <details>
+          <summary>Figure size and location</summary>
+          <div class="details-content form-grid">
+            <p class="wide field-note">These controls position the data rectangle inside each figure frame. The same geometry is used for the BNS map and the Winning X/Y view, so changing a linecut or secondary FC axis never resizes either plot.</p>
+            <label>Data width [%]
+              <input id="map-plot-width" type="number" value="94" min="50" max="100" step="1">
+            </label>
+            <label>Data height [%]
+              <input id="map-plot-height" type="number" value="100" min="50" max="100" step="1">
+            </label>
+            <label>Left offset [%]
+              <input id="map-plot-left" type="number" value="0" min="0" max="49" step="1">
+            </label>
+            <label>Bottom offset [%]
+              <input id="map-plot-bottom" type="number" value="0" min="0" max="49" step="1">
+            </label>
+            <button id="reset-map-layout" class="quiet-button wide" type="button">Reset tight map layout</button>
+          </div>
+        </details>
       </aside>
 
       <section class="workspace" aria-label="Sweep results">

@@ -48,6 +48,7 @@ const elements = {
   reweightResults: $("#reweight-results"), reweightNote: $("#reweight-note"),
   colorscaleTarget: $("#colorscale-target"), mapColorscale: $("#map-colorscale"), lineOrientation: $("#line-orientation"),
   showWinners: $("#show-winners"), showLegend: $("#show-legend"), showFcAxis: $("#show-fc-axis"), showFcAxisLabel: $("#show-fc-axis-label"), figureTheme: $("#figure-theme"), figureFontSize: $("#figure-font-size"), run: $("#run-sweep"), cancel: $("#cancel-sweep"),
+  mapPlotWidth: $("#map-plot-width"), mapPlotHeight: $("#map-plot-height"), mapPlotLeft: $("#map-plot-left"), mapPlotBottom: $("#map-plot-bottom"), resetMapLayout: $("#reset-map-layout"),
   download: $("#download-results"), downloadMapCsv: $("#download-map-csv"), downloadMapPng: $("#download-map-png"),
   downloadAnalysisCsv: $("#download-analysis-csv"), downloadAnalysisPng: $("#download-analysis-png"),
   jobTitle: $("#job-title"), jobMessage: $("#job-message"),
@@ -361,13 +362,14 @@ function fcLinewidthAxisLayout() {
   const tickvals = indices.map((index) => values[index]);
   const ticktext = indices.map((index) => formatNumber(fcHalfLinewidthHz({ ...configured, [field]: values[index] }), 4));
   const colors = figureColors();
+  const geometry = mapPlotGeometry();
   const secondary = {
     overlaying: axis, side: axis === "x" ? "top" : "right", title: { text: "FC HWHM [Hz]", font: { color: colors.ink, size: Math.max(10, figureFontSize() - 1) } },
     tickmode: "array", tickvals, ticktext, showgrid: false, zeroline: false, ticks: "outside",
-    range: [Math.min(...values), Math.max(...values)], anchor: "free", position: axis === "y" ? .94 : 1,
+    range: [Math.min(...values), Math.max(...values)], anchor: "free", position: axis === "y" ? geometry.xEnd : geometry.yEnd,
     visible: true, showticklabels: true, showline: true, linecolor: colors.zero, linewidth: 1,
     tickcolor: colors.zero, ticklen: 5, fixedrange: true,
-    tickfont: { color: colors.ink, size: Math.max(9, figureFontSize() - 2) },
+    color: colors.ink, tickfont: { color: colors.ink, size: Math.max(9, figureFontSize() - 2) },
   };
   return { axes: { [axis === "x" ? "xaxis2" : "yaxis2"]: secondary }, x: axis === "x", y: axis === "y" };
 }
@@ -700,8 +702,38 @@ function figureMargins(kind) {
   // Fixed generous margins keep the usable plot rectangle stable while users
   // switch themes, font sizes, map layers, or the FC secondary axis.
   return kind === "map"
-    ? { l: 76, r: 150, t: 8, b: 44 }
+    ? { l: 64, r: 126, t: 0, b: 36, pad: 0 }
     : { l: 88, r: 62, t: 72, b: 74 };
+}
+
+function boundedLayoutValue(element, fallback, minimum, maximum) {
+  const value = Number(element.value);
+  return Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
+}
+
+function mapPlotGeometry() {
+  const left = boundedLayoutValue(elements.mapPlotLeft, 0, 0, 49) / 100;
+  const bottom = boundedLayoutValue(elements.mapPlotBottom, 0, 0, 49) / 100;
+  const width = boundedLayoutValue(elements.mapPlotWidth, 94, 50, 100) / 100;
+  const height = boundedLayoutValue(elements.mapPlotHeight, 100, 50, 100) / 100;
+  // Keep every domain inside the paper, even when a user enters a size and
+  // offset combination that would otherwise extend past the figure frame.
+  const xEnd = Math.min(1, left + width);
+  const yEnd = Math.min(1, bottom + height);
+  return { x: [left, xEnd], y: [bottom, yEnd], xEnd, yEnd };
+}
+
+function renderMapFigures() {
+  renderMap();
+  if (state.analysisKind === "points") renderAnalysis();
+}
+
+function resetMapLayout() {
+  elements.mapPlotWidth.value = "94";
+  elements.mapPlotHeight.value = "100";
+  elements.mapPlotLeft.value = "0";
+  elements.mapPlotBottom.value = "0";
+  renderMapFigures();
 }
 
 function fcAxisAnchorTrace(x, y, fcAxis) {
@@ -823,10 +855,11 @@ function renderMap() {
   const fcAnchor = fcAxisAnchorTrace(x, y, fcAxis);
   if (fcAnchor) traces.push(fcAnchor);
   const theme = plotTheme();
+  const geometry = mapPlotGeometry();
   const layout = {
     ...theme, ...fcAxis.axes, margin: figureMargins("map"),
-    xaxis: figureAxis(state.result.x_parameter.label, { domain: [0, .94] }),
-    yaxis: figureAxis(state.result.y_parameter.label),
+    xaxis: figureAxis(state.result.x_parameter.label, { domain: geometry.x }),
+    yaxis: figureAxis(state.result.y_parameter.label, { domain: geometry.y }),
     showlegend: false,
   };
   Plotly.react(elements.mapPlot, traces, layout, { responsive: true, displaylogo: false });
@@ -844,10 +877,10 @@ function renderMap() {
     ? "The hollow rectangle marks the unchanged YAML operating point."
     : `The YAML operating point (${coordinateText(defaultX, defaultY)}) is outside this sweep.`;
   if (state.mapKind === "mismatch") {
-    elements.mapReadout.textContent = `Derived coherent two-mode SQZ–IFO mismatch in the common OMC basis. It uses no additional GWINC calls.${elements.showFcAxis.checked ? " Green secondary ticks show FC HWHM." : ""} ${operatingPointNote}`;
+    elements.mapReadout.textContent = `Derived coherent two-mode SQZ–IFO mismatch in the common OMC basis. It uses no additional GWINC calls.${elements.showFcAxis.checked ? " The secondary axis shows FC HWHM." : ""} ${operatingPointNote}`;
   } else {
     const selected = info.grid[state.selection.iy]?.[state.selection.ix];
-    elements.mapReadout.textContent = `Selected: ${coordinateText(x[state.selection.ix], y[state.selection.iy])}, range = ${formatNumber(selected)} Mpc.${elements.showFcAxis.checked ? " Green secondary ticks show FC HWHM." : ""} Click a cell to change the selected line. ${operatingPointNote}`;
+    elements.mapReadout.textContent = `Selected: ${coordinateText(x[state.selection.ix], y[state.selection.iy])}, range = ${formatNumber(selected)} Mpc.${elements.showFcAxis.checked ? " The secondary axis shows FC HWHM." : ""} Click a cell to change the selected line. ${operatingPointNote}`;
   }
 }
 
@@ -927,10 +960,11 @@ async function renderWinningPoints() {
   const fcAnchor = fcAxisAnchorTrace(trace.x, trace.y, fcAxis);
   const traces = fcAnchor ? [trace, fcAnchor] : [trace];
   const theme = plotTheme();
+  const geometry = mapPlotGeometry();
   Plotly.react(elements.analysisPlot, traces, {
     ...theme, ...fcAxis.axes, margin: figureMargins("map"), title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: figureFontSize() } },
-    xaxis: figureAxis(state.result.x_parameter.label, { domain: [0, .94] }),
-    yaxis: figureAxis(state.result.y_parameter.label),
+    xaxis: figureAxis(state.result.x_parameter.label, { domain: geometry.x }),
+    yaxis: figureAxis(state.result.y_parameter.label, { domain: geometry.y }),
     showlegend: false,
   }, { responsive: true, displaylogo: false });
   if (elements.analysisPlot.removeAllListeners) elements.analysisPlot.removeAllListeners("plotly_click");
@@ -1113,6 +1147,8 @@ function bindEvents() {
   elements.showFcAxis.addEventListener("change", () => { renderMap(); renderAnalysis(); });
   elements.figureTheme.addEventListener("change", () => { renderMap(); renderAnalysis(); });
   elements.figureFontSize.addEventListener("input", () => { renderMap(); renderAnalysis(); });
+  [elements.mapPlotWidth, elements.mapPlotHeight, elements.mapPlotLeft, elements.mapPlotBottom].forEach((element) => element.addEventListener("input", renderMapFigures));
+  elements.resetMapLayout.addEventListener("click", resetMapLayout);
   elements.run.addEventListener("click", runSweep);
   elements.cancel.addEventListener("click", cancelSweep);
   elements.reweightResults.addEventListener("click", reweightResults);
