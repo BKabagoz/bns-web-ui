@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Quantum-noise-only BNS range sweeps with a local GWINC compute server.">
+    <title>Quantum-noise BNS sweeps</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div>
+        <p class="eyebrow">PRECISION INTERFEROMETER DESIGN</p>
+        <h1>Quantum-noise BNS sweeps</h1>
+        <p class="subtitle">Interactive maps and spectra calculated by GWINC on your compute server.</p>
+      </div>
+      <div class="server-card">
+        <div class="server-fields">
+          <div class="server-field">
+            <label for="api-base">Compute-server address</label>
+            <div class="server-input-row">
+              <input id="api-base" type="url" spellcheck="false" placeholder="https://your-server.example">
+              <button id="check-server" class="quiet-button">Check</button>
+            </div>
+          </div>
+          <div class="token-row">
+            <label for="access-token">Access token <span>(only if required)</span></label>
+            <input id="access-token" type="password" autocomplete="off" placeholder="Not stored in the site">
+          </div>
+        </div>
+        <p id="server-status" class="server-status">Enter a compute-server address, then choose a YAML model.</p>
+      </div>
+    </header>
+
+    <main id="application" class="application">
+      <aside id="controls" class="controls" aria-label="Sweep controls">
+        <div class="controls-heading">
+          <div>
+            <p class="eyebrow">SETTINGS</p>
+            <h2>Calculation controls</h2>
+          </div>
+          <button id="hide-controls" class="icon-button" title="Hide controls" aria-label="Hide controls">×</button>
+        </div>
+
+        <details open>
+          <summary>Model and axes</summary>
+          <div class="details-content">
+            <label class="field-label" for="yaml-file">Interferometer YAML</label>
+            <input id="yaml-file" type="file" accept=".yaml,.yml,text/yaml,text/x-yaml">
+            <p id="yaml-status" class="field-note">Choose the same YAML model you use with the desktop UI.</p>
+
+            <div class="axis-grid">
+              <fieldset>
+                <legend>X axis</legend>
+                <label>Parameter <select id="x-parameter" disabled></select></label>
+                <label>Minimum <input id="x-minimum" type="number" step="any" disabled></label>
+                <label>Maximum <input id="x-maximum" type="number" step="any" disabled></label>
+                <label>Samples <input id="x-points" type="number" value="21" min="2" max="201" disabled></label>
+              </fieldset>
+              <fieldset>
+                <legend>Y axis</legend>
+                <label>Parameter <select id="y-parameter" disabled></select></label>
+                <label>Minimum <input id="y-minimum" type="number" step="any" disabled></label>
+                <label>Maximum <input id="y-maximum" type="number" step="any" disabled></label>
+                <label>Samples <input id="y-points" type="number" value="21" min="2" max="201" disabled></label>
+              </fieldset>
+            </div>
+            <p id="grid-readout" class="field-note">Load a model to choose two numerical fields.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Range calculation</summary>
+          <div class="details-content form-grid">
+            <label>Lower frequency [Hz]<input id="fmin" type="number" value="10" min="0.001" step="any"></label>
+            <label>Upper frequency [Hz]<input id="fmax" type="number" placeholder="Auto: ISCO" min="0" step="any"></label>
+            <label>Frequency samples<input id="frequency-points" type="number" value="801" min="2" max="4001" step="1"></label>
+            <label>GWINC calibration
+              <select id="output-calibration">
+                <option value="displacement">Displacement (desktop default)</option>
+                <option value="strain">Strain</option>
+              </select>
+            </label>
+            <label>Alternative mass 1 [M⊙]<input id="alternative-mass-1" type="number" value="1.4" min="0.01" step="any"></label>
+            <label>Alternative mass 2 [M⊙]<input id="alternative-mass-2" type="number" value="1.4" min="0.01" step="any"></label>
+            <p class="wide field-note">The standard map is 1.4 + 1.4 M⊙ at SNR 8. Both maps use quantum noise only and a leading-inspiral range with an ISCO cutoff.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Fixed model parameters <span id="override-count"></span></summary>
+          <div class="details-content">
+            <input id="parameter-filter" class="parameter-filter" type="search" placeholder="Filter fields by name or label">
+            <p class="field-note">Leave a field blank to retain its YAML value. The selected X/Y fields always use their sweep grids.</p>
+            <div id="parameter-editor" class="parameter-editor" aria-live="polite"></div>
+          </div>
+        </details>
+
+        <details>
+          <summary>Display</summary>
+          <div class="details-content form-grid">
+            <label>Apply color map to
+              <select id="colorscale-target">
+                <option value="map">BNS map + winning X/Y</option>
+                <option value="asd">ASD curve views</option>
+              </select>
+            </label>
+            <label>Color map
+              <select id="map-colorscale">
+                <option>Viridis</option><option>Plasma</option><option>Inferno</option><option>Magma</option>
+                <option>Cividis</option><option>Turbo</option><option>RdBu</option>
+              </select>
+            </label>
+            <label>Line direction
+              <select id="line-orientation">
+                <option value="horizontal">Horizontal rows</option>
+                <option value="vertical">Vertical columns</option>
+              </select>
+            </label>
+            <label class="wide checkbox-label"><input id="show-winners" type="checkbox" checked> Show line winners on BNS maps</label>
+            <label class="wide checkbox-label"><input id="show-legend" type="checkbox"> Show ASD legend inside the figure</label>
+          </div>
+        </details>
+      </aside>
+
+      <section class="workspace" aria-label="Sweep results">
+        <div class="action-bar">
+          <button id="show-controls" class="quiet-button">Controls</button>
+          <button id="run-sweep" class="primary-button" disabled>Run sweep</button>
+          <button id="cancel-sweep" class="quiet-button danger" disabled>Cancel</button>
+          <button id="download-results" class="quiet-button" disabled>Download NPZ</button>
+          <div class="action-spacer"></div>
+          <span id="job-id" class="job-id"></span>
+        </div>
+
+        <section id="job-panel" class="job-panel" aria-live="polite">
+          <div class="job-summary">
+            <strong id="job-title">Ready</strong>
+            <span id="job-message">Load a YAML model, choose axes, then start a sweep.</span>
+          </div>
+          <progress id="job-progress" value="0" max="1"></progress>
+          <span id="job-progress-text">—</span>
+        </section>
+
+        <section class="figure-grid">
+          <article class="figure-card map-card">
+            <div class="figure-heading">
+              <div>
+                <p class="eyebrow">RANGE MAP</p>
+                <h2 id="map-title">Quantum-noise BNS range</h2>
+              </div>
+              <div class="tab-list" role="tablist" aria-label="Map layer">
+                <button class="tab-button active" data-map="standard" role="tab">1.4 + 1.4</button>
+                <button class="tab-button" data-map="alternative" role="tab">Alternative</button>
+                <button id="mismatch-tab" class="tab-button" data-map="mismatch" role="tab" disabled>SQZ–IFO</button>
+              </div>
+            </div>
+            <div id="map-plot" class="plot" aria-label="BNS range map"></div>
+            <p id="map-readout" class="plot-readout">Run a sweep to display the BNS map.</p>
+          </article>
+
+          <article class="figure-card analysis-card">
+            <div class="figure-heading">
+              <div>
+                <p class="eyebrow">SPECTRAL ANALYSIS</p>
+                <h2 id="analysis-title">Selected line</h2>
+              </div>
+              <div class="tab-list" role="tablist" aria-label="Analysis layer">
+                <button class="analysis-tab active" data-analysis="line" role="tab">Selected line</button>
+                <button class="analysis-tab" data-analysis="best" role="tab">Best of every line</button>
+                <button class="analysis-tab" data-analysis="points" role="tab">Winning X/Y</button>
+              </div>
+            </div>
+            <div id="analysis-plot" class="plot" aria-label="Spectrum analysis"></div>
+            <p id="analysis-readout" class="plot-readout">Click a map cell after a sweep to choose a line.</p>
+          </article>
+        </section>
+
+        <section id="result-notes" class="result-notes" hidden>
+          <div><strong>Calculation convention</strong><span id="convention-note"></span></div>
+          <div><strong>Server timing</strong><span id="timing-note"></span></div>
+          <div><strong>Errors</strong><span id="errors-note"></span></div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>
