@@ -699,10 +699,10 @@ function figureAxis(title, extra = {}) {
 }
 
 function figureMargins(kind) {
-  // Fixed generous margins keep the usable plot rectangle stable while users
-  // switch themes, font sizes, map layers, or the FC secondary axis.
+  // These margins are deliberately independent of content.  Plotly must never
+  // be allowed to add room for a colorbar, an FC scale, or a changed linecut.
   return kind === "map"
-    ? { l: 64, r: 126, t: 0, b: 36, pad: 0 }
+    ? { l: 66, r: 112, t: 6, b: 44, pad: 0 }
     : { l: 88, r: 62, t: 72, b: 74 };
 }
 
@@ -714,7 +714,10 @@ function boundedLayoutValue(element, fallback, minimum, maximum) {
 function mapPlotGeometry() {
   const left = boundedLayoutValue(elements.mapPlotLeft, 0, 0, 49) / 100;
   const bottom = boundedLayoutValue(elements.mapPlotBottom, 0, 0, 49) / 100;
-  const width = boundedLayoutValue(elements.mapPlotWidth, 94, 50, 100) / 100;
+  // The right-hand paper strip is permanent: it contains the colorbar and,
+  // when requested, the FC HWHM scale.  Keeping it reserved is what makes the
+  // colored data rectangle invariant when either control changes.
+  const width = boundedLayoutValue(elements.mapPlotWidth, 86, 50, 86) / 100;
   const height = boundedLayoutValue(elements.mapPlotHeight, 100, 50, 100) / 100;
   // Keep every domain inside the paper, even when a user enters a size and
   // offset combination that would otherwise extend past the figure frame.
@@ -729,11 +732,30 @@ function renderMapFigures() {
 }
 
 function resetMapLayout() {
-  elements.mapPlotWidth.value = "94";
+  elements.mapPlotWidth.value = "86";
   elements.mapPlotHeight.value = "100";
   elements.mapPlotLeft.value = "0";
   elements.mapPlotBottom.value = "0";
   renderMapFigures();
+}
+
+function fixedPlotSize(element) {
+  // Plotly's responsive mode otherwise recomputes a different inner plotting
+  // rectangle for different traces.  The card supplies the size; every redraw
+  // uses exactly that same canvas.
+  return {
+    autosize: false,
+    width: Math.max(1, Math.round(element.clientWidth)),
+    height: Math.max(1, Math.round(element.clientHeight)),
+  };
+}
+
+function mapColorbar(title) {
+  return {
+    title: { text: title, side: "right" }, thickness: 13,
+    x: 1.04, xanchor: "left", y: .5, yanchor: "middle", len: 1,
+    outlinewidth: 0,
+  };
 }
 
 function fcAxisAnchorTrace(x, y, fcAxis) {
@@ -823,7 +845,7 @@ function renderMap() {
   const defaultInside = insideSweep(defaultX, x) && insideSweep(defaultY, y);
   const traces = [{
     type: "heatmap", x, y, z: info.grid, colorscale: colorscaleFor("map"),
-    colorbar: { title: { text: info.colorTitle, side: "right" }, thickness: 13, x: 1.17 },
+    colorbar: mapColorbar(info.colorTitle),
     hovertemplate: `${xLabel}: %{x:.6g}<br>${yLabel}: %{y:.6g}<br>${info.colorTitle}: %{z:.6g}<extra></extra>`,
   }];
   if (elements.showWinners.checked && state.mapKind !== "mismatch") {
@@ -857,12 +879,12 @@ function renderMap() {
   const theme = plotTheme();
   const geometry = mapPlotGeometry();
   const layout = {
-    ...theme, ...fcAxis.axes, margin: figureMargins("map"),
+    ...theme, ...fixedPlotSize(elements.mapPlot), ...fcAxis.axes, margin: figureMargins("map"),
     xaxis: figureAxis(state.result.x_parameter.label, { domain: geometry.x }),
     yaxis: figureAxis(state.result.y_parameter.label, { domain: geometry.y }),
     showlegend: false,
   };
-  Plotly.react(elements.mapPlot, traces, layout, { responsive: true, displaylogo: false });
+  Plotly.react(elements.mapPlot, traces, layout, { responsive: false, displaylogo: false });
   if (elements.mapPlot.removeAllListeners) elements.mapPlot.removeAllListeners("plotly_click");
   elements.mapPlot.on("plotly_click", (event) => {
     const point = event.points?.find((candidate) => candidate.data.type === "heatmap");
@@ -953,7 +975,7 @@ async function renderWinningPoints() {
     type: "scatter", mode: "markers", x: data.records.map((record) => record.x), y: data.records.map((record) => record.y),
     customdata: data.records.map((record) => [record.ix, record.iy, record.range_mpc]),
     marker: { size: 10, color: data.records.map((record) => record.range_mpc), colorscale: colorscaleFor("map"), showscale: true,
-      colorbar: { title: "Range [Mpc]", thickness: 13 } },
+      colorbar: mapColorbar("Range [Mpc]") },
     hovertemplate: `${escapeText(state.result.x_parameter.label)} = %{x:.6g}<br>${escapeText(state.result.y_parameter.label)} = %{y:.6g}<br>Range = %{customdata[2]:.6g} Mpc<extra></extra>`,
   };
   const fcAxis = fcLinewidthAxisLayout();
@@ -962,11 +984,11 @@ async function renderWinningPoints() {
   const theme = plotTheme();
   const geometry = mapPlotGeometry();
   Plotly.react(elements.analysisPlot, traces, {
-    ...theme, ...fcAxis.axes, margin: figureMargins("map"), title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: figureFontSize() } },
+    ...theme, ...fixedPlotSize(elements.analysisPlot), ...fcAxis.axes, margin: figureMargins("map"), title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: figureFontSize() } },
     xaxis: figureAxis(state.result.x_parameter.label, { domain: geometry.x }),
     yaxis: figureAxis(state.result.y_parameter.label, { domain: geometry.y }),
     showlegend: false,
-  }, { responsive: true, displaylogo: false });
+  }, { responsive: false, displaylogo: false });
   if (elements.analysisPlot.removeAllListeners) elements.analysisPlot.removeAllListeners("plotly_click");
   elements.analysisPlot.on("plotly_click", (event) => {
     const point = event.points?.[0];
@@ -1118,7 +1140,9 @@ async function downloadPlotImage(element, suffix) {
 
 function resizePlots() {
   if (!window.Plotly) return;
-  [elements.mapPlot, elements.analysisPlot].forEach((element) => Plotly.Plots.resize(element));
+  [elements.mapPlot, elements.analysisPlot].forEach((element) => {
+    if (element.data?.length) Plotly.relayout(element, fixedPlotSize(element));
+  });
 }
 
 function bindEvents() {
