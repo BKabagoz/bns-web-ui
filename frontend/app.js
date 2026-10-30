@@ -360,13 +360,14 @@ function fcLinewidthAxisLayout() {
   const indices = [...new Set([0, Math.round((values.length - 1) * .25), Math.round((values.length - 1) * .5), Math.round((values.length - 1) * .75), values.length - 1])];
   const tickvals = indices.map((index) => values[index]);
   const ticktext = indices.map((index) => formatNumber(fcHalfLinewidthHz({ ...configured, [field]: values[index] }), 4));
+  const colors = figureColors();
   const secondary = {
-    overlaying: axis, side: axis === "x" ? "top" : "right", title: { text: "FC HWHM [Hz]", font: { color: "#84d6bf", size: Math.max(10, figureFontSize() - 1) } },
+    overlaying: axis, side: axis === "x" ? "top" : "right", title: { text: "FC HWHM [Hz]", font: { color: colors.ink, size: Math.max(10, figureFontSize() - 1) } },
     tickmode: "array", tickvals, ticktext, showgrid: false, zeroline: false, ticks: "outside",
-    range: [Math.min(...values), Math.max(...values)], anchor: "free", position: 1,
-    visible: true, showticklabels: true, showline: true, linecolor: "#84d6bf", linewidth: 1.2,
-    tickcolor: "#84d6bf", ticklen: 5, fixedrange: true,
-    tickfont: { color: "#84d6bf", size: Math.max(9, figureFontSize() - 2) },
+    range: [Math.min(...values), Math.max(...values)], anchor: "free", position: axis === "y" ? .94 : 1,
+    visible: true, showticklabels: true, showline: true, linecolor: colors.zero, linewidth: 1,
+    tickcolor: colors.zero, ticklen: 5, fixedrange: true,
+    tickfont: { color: colors.ink, size: Math.max(9, figureFontSize() - 2) },
   };
   return { axes: { [axis === "x" ? "xaxis2" : "yaxis2"]: secondary }, x: axis === "x", y: axis === "y" };
 }
@@ -699,7 +700,7 @@ function figureMargins(kind) {
   // Fixed generous margins keep the usable plot rectangle stable while users
   // switch themes, font sizes, map layers, or the FC secondary axis.
   return kind === "map"
-    ? { l: 76, r: 150, t: 22, b: 56 }
+    ? { l: 76, r: 150, t: 8, b: 44 }
     : { l: 88, r: 62, t: 72, b: 74 };
 }
 
@@ -824,7 +825,7 @@ function renderMap() {
   const theme = plotTheme();
   const layout = {
     ...theme, ...fcAxis.axes, margin: figureMargins("map"),
-    xaxis: figureAxis(state.result.x_parameter.label),
+    xaxis: figureAxis(state.result.x_parameter.label, { domain: [0, .94] }),
     yaxis: figureAxis(state.result.y_parameter.label),
     showlegend: false,
   };
@@ -928,7 +929,7 @@ async function renderWinningPoints() {
   const theme = plotTheme();
   Plotly.react(elements.analysisPlot, traces, {
     ...theme, ...fcAxis.axes, margin: figureMargins("map"), title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: figureFontSize() } },
-    xaxis: figureAxis(state.result.x_parameter.label),
+    xaxis: figureAxis(state.result.x_parameter.label, { domain: [0, .94] }),
     yaxis: figureAxis(state.result.y_parameter.label),
     showlegend: false,
   }, { responsive: true, displaylogo: false });
