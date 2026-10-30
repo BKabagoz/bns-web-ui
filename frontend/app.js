@@ -44,8 +44,10 @@ const elements = {
   fcLinewidth: $("#fc-linewidth"), fcLinewidthValue: $("#fc-linewidth-value"), fcLinewidthNote: $("#fc-linewidth-note"),
   fmin: $("#fmin"), fmax: $("#fmax"), frequencyPoints: $("#frequency-points"),
   outputCalibration: $("#output-calibration"), altMass1: $("#alternative-mass-1"), altMass2: $("#alternative-mass-2"),
+  reweightPanel: $("#reweight-panel"), reweightMass1: $("#reweight-mass-1"), reweightMass2: $("#reweight-mass-2"),
+  reweightResults: $("#reweight-results"), reweightNote: $("#reweight-note"),
   colorscaleTarget: $("#colorscale-target"), mapColorscale: $("#map-colorscale"), lineOrientation: $("#line-orientation"),
-  showWinners: $("#show-winners"), showLegend: $("#show-legend"), showFcAxis: $("#show-fc-axis"), showFcAxisLabel: $("#show-fc-axis-label"), run: $("#run-sweep"), cancel: $("#cancel-sweep"),
+  showWinners: $("#show-winners"), showLegend: $("#show-legend"), showFcAxis: $("#show-fc-axis"), showFcAxisLabel: $("#show-fc-axis-label"), figureTheme: $("#figure-theme"), figureFontSize: $("#figure-font-size"), run: $("#run-sweep"), cancel: $("#cancel-sweep"),
   download: $("#download-results"), downloadMapCsv: $("#download-map-csv"), downloadMapPng: $("#download-map-png"),
   downloadAnalysisCsv: $("#download-analysis-csv"), downloadAnalysisPng: $("#download-analysis-png"),
   jobTitle: $("#job-title"), jobMessage: $("#job-message"),
@@ -595,11 +597,44 @@ async function loadResult() {
     };
     elements.run.disabled = false;
     setDownloadsEnabled(true);
+    const alternative = state.result.metadata.alternative_range;
+    elements.reweightPanel.hidden = false;
+    elements.reweightMass1.value = alternative.mass1_msun;
+    elements.reweightMass2.value = alternative.mass2_msun;
+    [elements.reweightMass1, elements.reweightMass2, elements.reweightResults].forEach((element) => { element.disabled = false; });
+    elements.reweightNote.textContent = "Reintegrate the cached spectra for a new binary. No additional GWINC calls are made.";
     renderResult();
     setJobPanel("Complete", `Calculated ${state.result.completed_points.toLocaleString()} grid points in ${state.result.elapsed_s.toFixed(1)} s.`, state.result.completed_points, state.result.total_points);
   } catch (error) {
     elements.run.disabled = false;
     setJobPanel("Could not load result", error.message);
+  }
+}
+
+async function reweightResults() {
+  if (!state.job || !state.result) return;
+  try {
+    const mass1 = numberValue(elements.reweightMass1, "Reweight mass 1");
+    const mass2 = numberValue(elements.reweightMass2, "Reweight mass 2");
+    if (mass1 <= 0 || mass2 <= 0) throw new Error("Both reweighting masses must be positive.");
+    elements.reweightResults.disabled = true;
+    elements.reweightNote.textContent = "Reweighting cached spectra…";
+    const response = await apiJson(`/api/jobs/${state.job.id}/reweight`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mass1_msun: mass1, mass2_msun: mass2 }),
+    });
+    state.result.alternative_range_mpc = response.range_mpc;
+    state.result.baseline_alternative_range_mpc = response.baseline_range_mpc;
+    state.result.metadata.alternative_range = response.metadata;
+    state.mapKind = "alternative";
+    setActiveMapTab();
+    renderMap();
+    renderAnalysis();
+    elements.reweightNote.textContent = `${mass1} + ${mass2} M⊙ applied. ${response.message}`;
+  } catch (error) {
+    elements.reweightNote.textContent = `Could not reweight: ${error.message}`;
+  } finally {
+    elements.reweightResults.disabled = false;
   }
 }
 
@@ -634,10 +669,27 @@ function winners(grid, horizontal) {
   return result;
 }
 
+function figureColors() {
+  return elements.figureTheme.value === "light"
+    ? { paper: "#ffffff", plot: "#ffffff", ink: "#17232c", grid: "#d7e0e5", zero: "#b5c3cb", hover: "#ffffff", hoverInk: "#17232c", legend: "rgba(255,255,255,.9)", outline: "#25333e" }
+    : { paper: "#111a22", plot: "#111a22", ink: "#dce6ea", grid: "#26343f", zero: "#344651", hover: "#081016", hoverInk: "#edf3f5", legend: "rgba(8,16,22,.82)", outline: "#f3f6f7" };
+}
+
+function figureFontSize() {
+  const value = Number(elements.figureFontSize.value);
+  return Number.isFinite(value) ? Math.max(8, Math.min(20, value)) : 11;
+}
+
+function figureAxis(title, extra = {}) {
+  const colors = figureColors();
+  return { title, gridcolor: colors.grid, zerolinecolor: colors.zero, automargin: true, ...extra };
+}
+
 function plotTheme() {
+  const colors = figureColors();
   return {
-    paper_bgcolor: "#111a22", plot_bgcolor: "#111a22", font: { color: "#dce6ea", size: 11 },
-    margin: { l: 68, r: 26, t: 32, b: 58 }, hoverlabel: { bgcolor: "#081016", font: { color: "#edf3f5" } },
+    paper_bgcolor: colors.paper, plot_bgcolor: colors.plot, font: { color: colors.ink, size: figureFontSize() },
+    margin: { l: 68, r: 26, t: 32, b: 58 }, hoverlabel: { bgcolor: colors.hover, font: { color: colors.hoverInk } },
   };
 }
 
@@ -648,10 +700,11 @@ function insideSweep(value, samples) {
 }
 
 function inPlotLegend() {
+  const colors = figureColors();
   return {
     x: 0.985, y: 0.985, xanchor: "right", yanchor: "top",
-    font: { size: 9, color: "#edf3f5" }, bgcolor: "rgba(8,16,22,.82)",
-    bordercolor: "rgba(163,183,194,.52)", borderwidth: 1,
+    font: { size: Math.max(8, figureFontSize() - 2), color: colors.ink }, bgcolor: colors.legend,
+    bordercolor: colors.grid, borderwidth: 1,
     traceorder: "normal", itemsizing: "constant",
   };
 }
@@ -703,6 +756,7 @@ function renderMap() {
   const defaultY = Number(state.result.y_parameter.default);
   const xLabel = escapeText(state.result.x_parameter.label);
   const yLabel = escapeText(state.result.y_parameter.label);
+  const colors = figureColors();
   const defaultInside = insideSweep(defaultX, x) && insideSweep(defaultY, y);
   const traces = [{
     type: "heatmap", x, y, z: info.grid, colorscale: colorscaleFor("map"),
@@ -713,7 +767,7 @@ function renderMap() {
     const points = winners(info.grid, horizontal);
     traces.push({
       type: "scatter", mode: "markers", x: points.map((point) => x[point.ix]), y: points.map((point) => y[point.iy]),
-      marker: { size: 9, color: "rgba(255,255,255,0)", line: { color: "#f3f6f7", width: 1.35 } },
+      marker: { size: 9, color: "rgba(255,255,255,0)", line: { color: colors.outline, width: 1.35 } },
       hovertemplate: `Line winner<br>${xLabel}: %{x:.6g}<br>${yLabel}: %{y:.6g}<extra></extra>`, name: "Line winners",
     });
   }
@@ -729,7 +783,7 @@ function renderMap() {
   if (defaultInside) {
     traces.push({
       type: "scatter", mode: "markers", x: [defaultX], y: [defaultY],
-      marker: { symbol: "square-open", size: 15, color: "#f3f6f7", line: { color: "#f3f6f7", width: 2 } },
+      marker: { symbol: "square-open", size: 15, color: colors.outline, line: { color: colors.outline, width: 2 } },
       hovertemplate: `Unchanged YAML operating point<br>${xLabel}: %{x:.6g}<br>${yLabel}: %{y:.6g}<extra></extra>`,
       showlegend: false, name: "YAML operating point",
     });
@@ -738,8 +792,8 @@ function renderMap() {
   const theme = plotTheme();
   const layout = {
     ...theme, ...fcAxis.axes, margin: { ...theme.margin, t: fcAxis.x ? 72 : theme.margin.t, r: fcAxis.y ? 104 : theme.margin.r }, title: { text: info.title, font: { size: 13 } },
-    xaxis: { title: state.result.x_parameter.label, gridcolor: "#26343f", zerolinecolor: "#344651", automargin: true },
-    yaxis: { title: state.result.y_parameter.label, gridcolor: "#26343f", zerolinecolor: "#344651", automargin: true },
+    xaxis: figureAxis(state.result.x_parameter.label),
+    yaxis: figureAxis(state.result.y_parameter.label),
     showlegend: false,
   };
   Plotly.react(elements.mapPlot, traces, layout, { responsive: true, displaylogo: false });
@@ -788,7 +842,7 @@ async function renderSelectedLine() {
   if (data.baseline_asd?.some(Number.isFinite)) {
     traces.push({
       type: "scatter", mode: "lines", x: data.frequency_hz, y: data.baseline_asd,
-      line: { color: "#f4f6f7", width: 2, dash: "dash" }, name: `Unchanged YAML baseline · ${formatNumber(data.baseline_range_mpc)} Mpc`,
+      line: { color: figureColors().outline, width: 2, dash: "dash" }, name: `Unchanged YAML baseline · ${formatNumber(data.baseline_range_mpc)} Mpc`,
     });
   }
   const fixed = orientation === "horizontal" ? state.result.y[index] : state.result.x[index];
@@ -796,8 +850,8 @@ async function renderSelectedLine() {
   const title = `${orientation === "horizontal" ? "Row" : "Column"} at ${fixedLabel} = ${formatNumber(fixed)}`;
   Plotly.react(elements.analysisPlot, traces, {
     ...plotTheme(), title: { text: title, font: { size: 13 } },
-    xaxis: { title: "Frequency [Hz]", type: "log", gridcolor: "#26343f" },
-    yaxis: { title: "Displacement ASD [m/√Hz]", type: "log", gridcolor: "#26343f" },
+    xaxis: figureAxis("Frequency [Hz]", { type: "log" }),
+    yaxis: figureAxis("Displacement ASD [m/√Hz]", { type: "log" }),
     showlegend: elements.showLegend.checked,
     legend: inPlotLegend(),
   }, { responsive: true, displaylogo: false });
@@ -816,8 +870,8 @@ async function renderBestLines() {
   }));
   Plotly.react(elements.analysisPlot, traces, {
     ...plotTheme(), title: { text: `Best spectrum from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: 13 } },
-    xaxis: { title: "Frequency [Hz]", type: "log", gridcolor: "#26343f" },
-    yaxis: { title: "Displacement ASD [m/√Hz]", type: "log", gridcolor: "#26343f" },
+    xaxis: figureAxis("Frequency [Hz]", { type: "log" }),
+    yaxis: figureAxis("Displacement ASD [m/√Hz]", { type: "log" }),
     showlegend: elements.showLegend.checked,
     legend: inPlotLegend(),
   }, { responsive: true, displaylogo: false });
@@ -840,8 +894,8 @@ async function renderWinningPoints() {
   const theme = plotTheme();
   Plotly.react(elements.analysisPlot, [trace], {
     ...theme, ...fcAxis.axes, margin: { ...theme.margin, t: fcAxis.x ? 72 : theme.margin.t, r: fcAxis.y ? 104 : theme.margin.r }, title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: 13 } },
-    xaxis: { title: state.result.x_parameter.label, gridcolor: "#26343f", automargin: true },
-    yaxis: { title: state.result.y_parameter.label, gridcolor: "#26343f", automargin: true },
+    xaxis: figureAxis(state.result.x_parameter.label),
+    yaxis: figureAxis(state.result.y_parameter.label),
     showlegend: false,
   }, { responsive: true, displaylogo: false });
   if (elements.analysisPlot.removeAllListeners) elements.analysisPlot.removeAllListeners("plotly_click");
@@ -1022,8 +1076,11 @@ function bindEvents() {
   elements.showWinners.addEventListener("change", renderMap);
   elements.showLegend.addEventListener("change", renderAnalysis);
   elements.showFcAxis.addEventListener("change", () => { renderMap(); renderAnalysis(); });
+  elements.figureTheme.addEventListener("change", () => { renderMap(); renderAnalysis(); });
+  elements.figureFontSize.addEventListener("input", () => { renderMap(); renderAnalysis(); });
   elements.run.addEventListener("click", runSweep);
   elements.cancel.addEventListener("click", cancelSweep);
+  elements.reweightResults.addEventListener("click", reweightResults);
   elements.download.addEventListener("click", downloadResults);
   elements.downloadMapCsv.addEventListener("click", downloadMapCsv);
   elements.downloadMapPng.addEventListener("click", () => downloadPlotImage(elements.mapPlot, `${state.mapKind}_map`));

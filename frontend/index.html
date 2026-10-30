@@ -99,6 +99,16 @@
           </div>
         </details>
 
+        <details id="reweight-panel" class="reweight-panel" hidden>
+          <summary>Post-sweep mass reweighting</summary>
+          <div class="details-content form-grid">
+            <label>Mass 1 [M⊙]<input id="reweight-mass-1" type="number" value="1.4" min="0.01" step="any" disabled></label>
+            <label>Mass 2 [M⊙]<input id="reweight-mass-2" type="number" value="1.4" min="0.01" step="any" disabled></label>
+            <button id="reweight-results" class="primary-button wide" disabled>Reweight cached spectra</button>
+            <p id="reweight-note" class="wide field-note">Run a sweep first. This changes the alternative-mass map without running GWINC again.</p>
+          </div>
+        </details>
+
         <details>
           <summary>Fixed model parameters <span id="override-count"></span></summary>
           <div class="details-content">
@@ -132,6 +142,12 @@
             <label class="wide checkbox-label"><input id="show-winners" type="checkbox" checked> Show line winners on BNS maps</label>
             <label class="wide checkbox-label"><input id="show-legend" type="checkbox"> Show ASD legend inside the figure</label>
             <label id="show-fc-axis-label" class="wide checkbox-label" title="Select exactly one filter-cavity linewidth input as an axis to enable this option."><input id="show-fc-axis" type="checkbox" disabled> Show FC HWHM as a secondary axis</label>
+            <label>Figure background
+              <select id="figure-theme"><option value="dark">Dark</option><option value="light">Light</option></select>
+            </label>
+            <label>Figure font size [px]
+              <input id="figure-font-size" type="number" value="11" min="8" max="20" step="1">
+            </label>
           </div>
         </details>
       </aside>
