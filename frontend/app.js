@@ -699,8 +699,20 @@ function figureMargins(kind) {
   // Fixed generous margins keep the usable plot rectangle stable while users
   // switch themes, font sizes, map layers, or the FC secondary axis.
   return kind === "map"
-    ? { l: 88, r: 150, t: 72, b: 74 }
+    ? { l: 76, r: 150, t: 22, b: 56 }
     : { l: 88, r: 62, t: 72, b: 74 };
+}
+
+function fcAxisAnchorTrace(x, y, fcAxis) {
+  if (fcAxis.x) return {
+    type: "scatter", mode: "markers", x: [x[0]], y: [y[0]], xaxis: "x2",
+    marker: { opacity: 0 }, hoverinfo: "skip", showlegend: false,
+  };
+  if (fcAxis.y) return {
+    type: "scatter", mode: "markers", x: [x[0]], y: [y[0]], yaxis: "y2",
+    marker: { opacity: 0 }, hoverinfo: "skip", showlegend: false,
+  };
+  return null;
 }
 
 function plotTheme() {
@@ -807,9 +819,11 @@ function renderMap() {
     });
   }
   const fcAxis = fcLinewidthAxisLayout();
+  const fcAnchor = fcAxisAnchorTrace(x, y, fcAxis);
+  if (fcAnchor) traces.push(fcAnchor);
   const theme = plotTheme();
   const layout = {
-    ...theme, ...fcAxis.axes, margin: figureMargins("map"), title: { text: info.title, font: { size: figureFontSize() } },
+    ...theme, ...fcAxis.axes, margin: figureMargins("map"),
     xaxis: figureAxis(state.result.x_parameter.label),
     yaxis: figureAxis(state.result.y_parameter.label),
     showlegend: false,
@@ -909,8 +923,10 @@ async function renderWinningPoints() {
     hovertemplate: `${escapeText(state.result.x_parameter.label)} = %{x:.6g}<br>${escapeText(state.result.y_parameter.label)} = %{y:.6g}<br>Range = %{customdata[2]:.6g} Mpc<extra></extra>`,
   };
   const fcAxis = fcLinewidthAxisLayout();
+  const fcAnchor = fcAxisAnchorTrace(trace.x, trace.y, fcAxis);
+  const traces = fcAnchor ? [trace, fcAnchor] : [trace];
   const theme = plotTheme();
-  Plotly.react(elements.analysisPlot, [trace], {
+  Plotly.react(elements.analysisPlot, traces, {
     ...theme, ...fcAxis.axes, margin: figureMargins("map"), title: { text: `Winning coordinates from every ${orientation === "horizontal" ? "row" : "column"}`, font: { size: figureFontSize() } },
     xaxis: figureAxis(state.result.x_parameter.label),
     yaxis: figureAxis(state.result.y_parameter.label),
